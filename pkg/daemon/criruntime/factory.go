@@ -208,6 +208,15 @@ func detectRuntime(varRunPath string) []runtimeConfig {
 				runtimeRemoteURI: fmt.Sprintf("unix://%s/containerd/containerd.sock", varRunPath),
 			})
 		}
+
+		//cri-o
+		if _, err = os.Stat(fmt.Sprintf("%s/crio/crio.sock", varRunPath)); err == nil {
+			cfgs = append(cfgs, runtimeConfig{
+				runtimeType:      ContainerRuntimeContainerd,
+				runtimeRemoteURI: fmt.Sprintf("unix://%s/crio/crio.sock", varRunPath),
+			})
+		}
+
 	}
 
 	return cfgs
