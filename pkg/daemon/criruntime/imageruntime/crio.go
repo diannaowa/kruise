@@ -34,7 +34,7 @@ import (
 
 const maxMsgSize = 1024 * 1024 * 16
 
-// NewDockerImageService create a crio runtime
+// NewCrioImageService create a cri-o runtime
 func NewCrioImageService(runtimeURI string, accountManager daemonutil.ImagePullAccountManager) (ImageService, error) {
 	klog.V(3).InfoS("Connecting to image service", "endpoint", runtimeURI)
 	addr, dialer, err := util.GetAddressAndDialer(runtimeURI)
@@ -60,31 +60,23 @@ func NewCrioImageService(runtimeURI string, accountManager daemonutil.ImagePullA
 
 	return &crioImageService{
 		accountManager: accountManager,
-		snapshotter:    "",
 		criImageClient: imageClient,
-		httpProxy:      "",
 	}, nil
 }
 
 type crioImageService struct {
 	accountManager daemonutil.ImagePullAccountManager
-	snapshotter    string
 	criImageClient runtimeapi.ImageServiceClient
-	httpProxy      string
 	sync.Mutex
 }
 
 // PullImage implements ImageService.PullImage.
-func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string, pullSecrets []v1.Secret) (ImagePullStatusReader, error) {
+func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string, pullSecrets []v1.Secret) (ImagePullStatusReader, error) {
 	registry := daemonutil.ParseRegistry(imageName)
 	fullImageName := imageName + ":" + tag
-	// just for Reader
+	// mock Reader
 	pipeR, pipeW := io.Pipe()
 	stream := jsonstream.New(pipeW, nil)
-
-	defer stream.Close()
-	defer stream.Wait()
-	defer pipeW.Close()
 
 	var auth *runtimeapi.AuthConfig
 	pullImageReq := &runtimeapi.PullImageRequest{
@@ -108,7 +100,7 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 					Username: authInfo.Username,
 					Password: authInfo.Password,
 				}
-				pullImageResp, pullErr := d.criImageClient.PullImage(ctx, pullImageReq)
+				pullImageResp, pullErr := c.criImageClient.PullImage(ctx, pullImageReq)
 				if pullErr == nil {
 					stream.WriteObject(jsonstream.JSONMessage{
 						ID:        pullImageResp.GetImageRef(),
@@ -117,8 +109,12 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 						StartedAt: time.Now(),
 						UpdatedAt: time.Now(),
 					})
+					stream.Close()
+					stream.Wait()
+					pipeW.Close()
 					return newImagePullStatusReader(pipeR), nil
 				}
+				c.handleRuntimeError(pullErr)
 				klog.Warningf("Failed to pull image %v:%v with user %v, err %v", imageName, tag, authInfo.Username, pullErr)
 				pullErrs = append(pullErrs, pullErr)
 
@@ -130,10 +126,10 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	}
 
 	// Try the default secret
-	if d.accountManager != nil {
+	if c.accountManager != nil {
 		var authInfo *daemonutil.AuthInfo
 		var defaultErr error
-		authInfo, defaultErr = d.accountManager.GetAccountInfo(registry)
+		authInfo, defaultErr = c.accountManager.GetAccountInfo(registry)
 		if defaultErr != nil {
 			klog.Warningf("Failed to get account for registry %v, err %v", registry, defaultErr)
 			// When the default account acquisition fails, try to pull anonymously
@@ -143,7 +139,7 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 				Username: authInfo.Username,
 				Password: authInfo.Password,
 			}
-			pullImageResp, err := d.criImageClient.PullImage(ctx, pullImageReq)
+			pullImageResp, err := c.criImageClient.PullImage(ctx, pullImageReq)
 			if err == nil {
 				stream.WriteObject(jsonstream.JSONMessage{
 					ID:        pullImageResp.GetImageRef(),
@@ -152,9 +148,12 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 					StartedAt: time.Now(),
 					UpdatedAt: time.Now(),
 				})
+				stream.Close()
+				stream.Wait()
+				pipeW.Close()
 				return newImagePullStatusReader(pipeR), nil
 			}
-			d.handleRuntimeError(err)
+			c.handleRuntimeError(err)
 			klog.Warningf("Failed to pull image %v:%v, err %v", imageName, tag, err)
 			return nil, err
 
@@ -164,8 +163,9 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 		return nil, err
 	}
 	// Anonymous pull
-	pullImageResp, err := d.criImageClient.PullImage(ctx, pullImageReq)
+	pullImageResp, err := c.criImageClient.PullImage(ctx, pullImageReq)
 	if err != nil {
+		c.handleRuntimeError(err)
 		return nil, errors.Wrapf(err, "failed to pull image reference %q", fullImageName)
 	}
 
@@ -177,19 +177,36 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	})
+	stream.Close()
+	stream.Wait()
+	pipeW.Close()
 	return newImagePullStatusReader(pipeR), nil
 }
 
 // ListImages implements ImageService.ListImages.
-func (d *crioImageService) ListImages(ctx context.Context) ([]ImageInfo, error) {
-
-	return nil, nil
+func (c *crioImageService) ListImages(ctx context.Context) ([]ImageInfo, error) {
+	listImagesReq := &runtimeapi.ListImagesRequest{}
+	listImagesResp, err := c.criImageClient.ListImages(ctx, listImagesReq)
+	if err != nil {
+		c.handleRuntimeError(err)
+		return nil, err
+	}
+	collection := make([]ImageInfo, 0, len(listImagesResp.GetImages()))
+	for _, img := range listImagesResp.GetImages() {
+		collection = append(collection, ImageInfo{
+			ID:          img.GetId(),
+			RepoTags:    img.GetRepoTags(),
+			RepoDigests: img.GetRepoDigests(),
+			Size:        int64(img.GetSize_()),
+		})
+	}
+	return collection, nil
 }
 
-func (d *crioImageService) handleRuntimeError(err error) {
+func (c *crioImageService) handleRuntimeError(err error) {
 	if daemonutil.FilterCloseErr(err) {
-		d.Lock()
-		defer d.Unlock()
-		d.criImageClient = nil
+		c.Lock()
+		defer c.Unlock()
+		c.criImageClient = nil
 	}
 }
