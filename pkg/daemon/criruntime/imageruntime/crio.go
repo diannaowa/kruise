@@ -18,17 +18,17 @@ package imageruntime
 
 import (
 	"context"
-	"fmt"
 	"github.com/alibaba/pouch/pkg/jsonstream"
-	"github.com/containerd/containerd/namespaces"
 	daemonutil "github.com/openkruise/kruise/pkg/daemon/util"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"io"
 	v1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/kubelet/cri/remote/util"
+	"sync"
 	"time"
 )
 
@@ -71,11 +71,13 @@ type crioImageService struct {
 	snapshotter    string
 	criImageClient runtimeapi.ImageServiceClient
 	httpProxy      string
+	sync.Mutex
 }
 
 // PullImage implements ImageService.PullImage.
 func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string, pullSecrets []v1.Secret) (ImagePullStatusReader, error) {
-	ctx = namespaces.WithNamespace(ctx, k8sContainerdNamespace)
+	registry := daemonutil.ParseRegistry(imageName)
+	fullImageName := imageName + ":" + tag
 	// just for Reader
 	pipeR, pipeW := io.Pipe()
 	stream := jsonstream.New(pipeW, nil)
@@ -84,27 +86,89 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	defer stream.Wait()
 	defer pipeW.Close()
 
-	if tag == "" {
-		tag = defaultTag
-	}
-
-	imageRef := fmt.Sprintf("%s:%s", imageName, tag)
-	namedRef, err := daemonutil.NormalizeImageRef(imageRef)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse image reference %q", imageRef)
-	}
-	pr := &runtimeapi.PullImageRequest{
+	var auth *runtimeapi.AuthConfig
+	pullImageReq := &runtimeapi.PullImageRequest{
 		Image: &runtimeapi.ImageSpec{
-			Image:       namedRef.Name(),
+			Image:       fullImageName,
 			Annotations: make(map[string]string),
 		},
-		Auth:          nil,
+		Auth:          auth, //default is nil
 		SandboxConfig: nil,
 	}
-	pullImageResp, err := d.criImageClient.PullImage(ctx, pr)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to pull image reference %q", imageRef)
+	var err error
+	if len(pullSecrets) > 0 {
+		authInfos, err := convertToRegistryAuths(pullSecrets, registry)
+		if err == nil {
+			var pullErrs []error
+			for _, authInfo := range authInfos {
+				var pullErr error
+				klog.V(5).Infof("Pull image %v:%v with user %v", imageName, tag, authInfo.Username)
+
+				pullImageReq.Auth = &runtimeapi.AuthConfig{
+					Username: authInfo.Username,
+					Password: authInfo.Password,
+				}
+				pullImageResp, pullErr := d.criImageClient.PullImage(ctx, pullImageReq)
+				if pullErr == nil {
+					stream.WriteObject(jsonstream.JSONMessage{
+						ID:        pullImageResp.GetImageRef(),
+						Status:    jsonstream.PullStatusDone,
+						Detail:    nil,
+						StartedAt: time.Now(),
+						UpdatedAt: time.Now(),
+					})
+					return newImagePullStatusReader(pipeR), nil
+				}
+				klog.Warningf("Failed to pull image %v:%v with user %v, err %v", imageName, tag, authInfo.Username, pullErr)
+				pullErrs = append(pullErrs, pullErr)
+
+			}
+			if len(pullErrs) > 0 {
+				err = utilerrors.NewAggregate(pullErrs)
+			}
+		}
 	}
+
+	// Try the default secret
+	if d.accountManager != nil {
+		var authInfo *daemonutil.AuthInfo
+		var defaultErr error
+		authInfo, defaultErr = d.accountManager.GetAccountInfo(registry)
+		if defaultErr != nil {
+			klog.Warningf("Failed to get account for registry %v, err %v", registry, defaultErr)
+			// When the default account acquisition fails, try to pull anonymously
+		} else if authInfo != nil {
+			klog.V(5).Infof("Pull image %v:%v with user %v", imageName, tag, authInfo.Username)
+			pullImageReq.Auth = &runtimeapi.AuthConfig{
+				Username: authInfo.Username,
+				Password: authInfo.Password,
+			}
+			pullImageResp, err := d.criImageClient.PullImage(ctx, pullImageReq)
+			if err == nil {
+				stream.WriteObject(jsonstream.JSONMessage{
+					ID:        pullImageResp.GetImageRef(),
+					Status:    jsonstream.PullStatusDone,
+					Detail:    nil,
+					StartedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				})
+				return newImagePullStatusReader(pipeR), nil
+			}
+			d.handleRuntimeError(err)
+			klog.Warningf("Failed to pull image %v:%v, err %v", imageName, tag, err)
+			return nil, err
+
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Anonymous pull
+	pullImageResp, err := d.criImageClient.PullImage(ctx, pullImageReq)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to pull image reference %q", fullImageName)
+	}
+
 	klog.Infof("duizhang %v", pullImageResp)
 	stream.WriteObject(jsonstream.JSONMessage{
 		ID:        pullImageResp.GetImageRef(),
@@ -120,4 +184,12 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 func (d *crioImageService) ListImages(ctx context.Context) ([]ImageInfo, error) {
 
 	return nil, nil
+}
+
+func (d *crioImageService) handleRuntimeError(err error) {
+	if daemonutil.FilterCloseErr(err) {
+		d.Lock()
+		defer d.Unlock()
+		d.criImageClient = nil
+	}
 }
