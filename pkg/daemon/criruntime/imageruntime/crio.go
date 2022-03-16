@@ -19,6 +19,7 @@ package imageruntime
 import (
 	"context"
 	"fmt"
+	"github.com/alibaba/pouch/pkg/jsonstream"
 	"github.com/containerd/containerd/namespaces"
 	daemonutil "github.com/openkruise/kruise/pkg/daemon/util"
 	"github.com/pkg/errors"
@@ -77,8 +78,11 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	ctx = namespaces.WithNamespace(ctx, k8sContainerdNamespace)
 	// just for Reader
 	pipeR, pipeW := io.Pipe()
+	stream := jsonstream.New(pipeW, nil)
+
+	defer stream.Close()
+	defer stream.Wait()
 	defer pipeW.Close()
-	defer pipeR.Close()
 
 	if tag == "" {
 		tag = defaultTag
@@ -102,6 +106,13 @@ func (d *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 		return nil, errors.Wrapf(err, "failed to pull image reference %q", imageRef)
 	}
 	klog.Infof("duizhang %v", pullImageResp)
+	stream.WriteObject(jsonstream.JSONMessage{
+		ID:        pullImageResp.GetImageRef(),
+		Status:    jsonstream.PullStatusDone,
+		Detail:    nil,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	})
 	return newImagePullStatusReader(pipeR), nil
 }
 
