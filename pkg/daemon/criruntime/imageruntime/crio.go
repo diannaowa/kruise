@@ -77,6 +77,9 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	// mock Reader
 	pipeR, pipeW := io.Pipe()
 	stream := jsonstream.New(pipeW, nil)
+	defer stream.Close()
+	defer stream.Wait()
+	defer pipeW.Close()
 
 	var auth *runtimeapi.AuthConfig
 	pullImageReq := &runtimeapi.PullImageRequest{
@@ -100,6 +103,7 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 					Username: authInfo.Username,
 					Password: authInfo.Password,
 				}
+				klog.Infof("duizhang %s %s", authInfo.Username)
 				pullImageResp, pullErr := c.criImageClient.PullImage(ctx, pullImageReq)
 				if pullErr == nil {
 					stream.WriteObject(jsonstream.JSONMessage{
@@ -109,9 +113,6 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 						StartedAt: time.Now(),
 						UpdatedAt: time.Now(),
 					})
-					stream.Close()
-					stream.Wait()
-					pipeW.Close()
 					return newImagePullStatusReader(pipeR), nil
 				}
 				c.handleRuntimeError(pullErr)
@@ -148,9 +149,6 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 					StartedAt: time.Now(),
 					UpdatedAt: time.Now(),
 				})
-				stream.Close()
-				stream.Wait()
-				pipeW.Close()
 				return newImagePullStatusReader(pipeR), nil
 			}
 			c.handleRuntimeError(err)
@@ -177,9 +175,6 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 		StartedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	})
-	stream.Close()
-	stream.Wait()
-	pipeW.Close()
 	return newImagePullStatusReader(pipeR), nil
 }
 
