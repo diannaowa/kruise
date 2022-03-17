@@ -93,6 +93,7 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	var err error
 	if len(pullSecrets) > 0 {
 		authInfos, err := convertToRegistryAuths(pullSecrets, registry)
+		klog.Infof("duizhang authinfo %v", err)
 		if err == nil {
 			var pullErrs []error
 			for _, authInfo := range authInfos {
