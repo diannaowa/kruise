@@ -83,8 +83,7 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 			Image:       fullImageName,
 			Annotations: make(map[string]string),
 		},
-		Auth:          auth, //default is nil
-		SandboxConfig: nil,
+		Auth: auth, //default is nil
 	}
 	var err error
 	if len(pullSecrets) > 0 {
