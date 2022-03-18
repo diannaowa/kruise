@@ -75,7 +75,7 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	fullImageName := imageName + ":" + tag
 	// Reader
 	pipeR, pipeW := io.Pipe()
-	pipeW.Close()
+	defer pipeW.Close()
 
 	var auth *runtimeapi.AuthConfig
 	pullImageReq := &runtimeapi.PullImageRequest{
@@ -141,7 +141,7 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Anonymous pull
 	_, err = c.criImageClient.PullImage(ctx, pullImageReq)
 	if err != nil {
