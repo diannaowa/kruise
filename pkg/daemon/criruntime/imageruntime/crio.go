@@ -18,7 +18,6 @@ package imageruntime
 
 import (
 	"context"
-	"github.com/alibaba/pouch/pkg/jsonstream"
 	daemonutil "github.com/openkruise/kruise/pkg/daemon/util"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
@@ -76,10 +75,10 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	fullImageName := imageName + ":" + tag
 	// mock Reader
 	pipeR, pipeW := io.Pipe()
-	stream := jsonstream.New(pipeW, nil)
+	//stream := jsonstream.New(pipeW, nil)
 	defer func() {
-		stream.Close()
-		stream.Wait()
+		//stream.Close()
+		//stream.Wait()
 		pipeW.Close()
 	}()
 
@@ -104,15 +103,19 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 					Username: authInfo.Username,
 					Password: authInfo.Password,
 				}
-				pullImageResp, pullErr := c.criImageClient.PullImage(ctx, pullImageReq)
+				_, pullErr = c.criImageClient.PullImage(ctx, pullImageReq)
 				if pullErr == nil {
-					stream.WriteObject(jsonstream.JSONMessage{
-						ID:        pullImageResp.GetImageRef(),
-						Status:    jsonstream.PullStatusDone,
-						Detail:    nil,
-						StartedAt: time.Now(),
-						UpdatedAt: time.Now(),
-					})
+					//stream.WriteObject(jsonstream.JSONMessage{
+					//	ID:     pullImageResp.GetImageRef(),
+					//	Status: jsonstream.PullStatusDone,
+					//	Detail: &jsonstream.ProgressDetail{
+					//		Current: 100,
+					//		Total:   100,
+					//	},
+					//	StartedAt: time.Now(),
+					//	UpdatedAt: time.Now(),
+					//})
+					pipeW.CloseWithError(io.EOF)
 					return newImagePullStatusReader(pipeR), nil
 				}
 				c.handleRuntimeError(pullErr)
@@ -140,41 +143,48 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 				Username: authInfo.Username,
 				Password: authInfo.Password,
 			}
-			pullImageResp, err := c.criImageClient.PullImage(ctx, pullImageReq)
+			_, err = c.criImageClient.PullImage(ctx, pullImageReq)
 			if err == nil {
-				stream.WriteObject(jsonstream.JSONMessage{
-					ID:        pullImageResp.GetImageRef(),
-					Status:    jsonstream.PullStatusDone,
-					Detail:    nil,
-					StartedAt: time.Now(),
-					UpdatedAt: time.Now(),
-				})
+				//stream.WriteObject(jsonstream.JSONMessage{
+				//	ID:     pullImageResp.GetImageRef(),
+				//	Status: jsonstream.PullStatusDone,
+				//	Detail: &jsonstream.ProgressDetail{
+				//		Current: 100,
+				//		Total:   100,
+				//	},
+				//	StartedAt: time.Now(),
+				//	UpdatedAt: time.Now(),
+				//})
+				pipeW.CloseWithError(io.EOF)
 				return newImagePullStatusReader(pipeR), nil
 			}
 			c.handleRuntimeError(err)
 			klog.Warningf("Failed to pull image %v:%v, err %v", imageName, tag, err)
 			return nil, err
-
 		}
 	}
 	if err != nil {
 		return nil, err
 	}
+
 	// Anonymous pull
-	pullImageResp, err := c.criImageClient.PullImage(ctx, pullImageReq)
+
+	_, err = c.criImageClient.PullImage(ctx, pullImageReq)
 	if err != nil {
 		c.handleRuntimeError(err)
-		return nil, errors.Wrapf(err, "failed to pull image reference %q", fullImageName)
+		return nil, errors.Wrapf(err, "Failed to pull image reference %q", fullImageName)
 	}
-
-	klog.Infof("duizhang %v", pullImageResp)
-	stream.WriteObject(jsonstream.JSONMessage{
-		ID:        pullImageResp.GetImageRef(),
-		Status:    jsonstream.PullStatusDone,
-		Detail:    nil,
-		StartedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	})
+	//stream.WriteObject(jsonstream.JSONMessage{
+	//	ID:     pullImageResp.GetImageRef(),
+	//	Status: jsonstream.PullStatusDone,
+	//	Detail: &jsonstream.ProgressDetail{
+	//		Current: 100,
+	//		Total:   100,
+	//	},
+	//	StartedAt: time.Now(),
+	//	UpdatedAt: time.Now(),
+	//})
+	pipeW.CloseWithError(io.EOF)
 	return newImagePullStatusReader(pipeR), nil
 }
 
