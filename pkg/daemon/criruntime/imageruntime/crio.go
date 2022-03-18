@@ -73,14 +73,9 @@ type crioImageService struct {
 func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string, pullSecrets []v1.Secret) (ImagePullStatusReader, error) {
 	registry := daemonutil.ParseRegistry(imageName)
 	fullImageName := imageName + ":" + tag
-	// mock Reader
+	// Reader
 	pipeR, pipeW := io.Pipe()
-	//stream := jsonstream.New(pipeW, nil)
-	defer func() {
-		//stream.Close()
-		//stream.Wait()
-		pipeW.Close()
-	}()
+	pipeW.Close()
 
 	var auth *runtimeapi.AuthConfig
 	pullImageReq := &runtimeapi.PullImageRequest{
@@ -105,16 +100,6 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 				}
 				_, pullErr = c.criImageClient.PullImage(ctx, pullImageReq)
 				if pullErr == nil {
-					//stream.WriteObject(jsonstream.JSONMessage{
-					//	ID:     pullImageResp.GetImageRef(),
-					//	Status: jsonstream.PullStatusDone,
-					//	Detail: &jsonstream.ProgressDetail{
-					//		Current: 100,
-					//		Total:   100,
-					//	},
-					//	StartedAt: time.Now(),
-					//	UpdatedAt: time.Now(),
-					//})
 					pipeW.CloseWithError(io.EOF)
 					return newImagePullStatusReader(pipeR), nil
 				}
@@ -145,16 +130,6 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 			}
 			_, err = c.criImageClient.PullImage(ctx, pullImageReq)
 			if err == nil {
-				//stream.WriteObject(jsonstream.JSONMessage{
-				//	ID:     pullImageResp.GetImageRef(),
-				//	Status: jsonstream.PullStatusDone,
-				//	Detail: &jsonstream.ProgressDetail{
-				//		Current: 100,
-				//		Total:   100,
-				//	},
-				//	StartedAt: time.Now(),
-				//	UpdatedAt: time.Now(),
-				//})
 				pipeW.CloseWithError(io.EOF)
 				return newImagePullStatusReader(pipeR), nil
 			}
@@ -166,24 +141,13 @@ func (c *crioImageService) PullImage(ctx context.Context, imageName, tag string,
 	if err != nil {
 		return nil, err
 	}
-
+	
 	// Anonymous pull
-
 	_, err = c.criImageClient.PullImage(ctx, pullImageReq)
 	if err != nil {
 		c.handleRuntimeError(err)
 		return nil, errors.Wrapf(err, "Failed to pull image reference %q", fullImageName)
 	}
-	//stream.WriteObject(jsonstream.JSONMessage{
-	//	ID:     pullImageResp.GetImageRef(),
-	//	Status: jsonstream.PullStatusDone,
-	//	Detail: &jsonstream.ProgressDetail{
-	//		Current: 100,
-	//		Total:   100,
-	//	},
-	//	StartedAt: time.Now(),
-	//	UpdatedAt: time.Now(),
-	//})
 	pipeW.CloseWithError(io.EOF)
 	return newImagePullStatusReader(pipeR), nil
 }
