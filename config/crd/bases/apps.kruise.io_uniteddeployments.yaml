@@ -617,6 +617,11 @@ spec:
                               that will be employed to create and delete Pods in the
                               CloneSet.
                             properties:
+                              autoCleanupPVC:
+                                description: Default value is false. The scale will
+                                  delete old pvc(create new one) if this field is
+                                  true.
+                                type: boolean
                               maxUnavailable:
                                 anyOf:
                                 - type: integer
