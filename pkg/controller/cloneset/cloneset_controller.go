@@ -455,11 +455,17 @@ func (r *ReconcileCloneSet) getOwnedResource(cs *appsv1alpha1.CloneSet) ([]*v1.P
 		FieldSelector: fields.SelectorFromSet(fields.Set{fieldindex.IndexNameForOwnerRefUID: string(cs.UID)}),
 	}
 
-	filteredPods, err := clonesetutils.GetActivePods(r.Client, opts)
+	filteredPods, inactivePods, err := clonesetutils.GetActivePods(r.Client, opts)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// cleanup useless pvc by inactive pods
+	err = r.cleanupUselessPVCs(cs, inactivePods)
+	if err != nil {
+		return nil, nil, err
+	}
+	///
 	pvcList := v1.PersistentVolumeClaimList{}
 	if err := r.List(context.TODO(), &pvcList, opts, utilclient.DisableDeepCopy); err != nil {
 		return nil, nil, err
@@ -570,4 +576,21 @@ func (r *ReconcileCloneSet) claimPods(instance *appsv1alpha1.CloneSet, pods []*v
 	}
 
 	return claimedPods, nil
+}
+func (r *ReconcileCloneSet) cleanupUselessPVCs(cs *appsv1alpha1.CloneSet, inactivePods []*v1.Pod) error {
+	if len(inactivePods) == 0 || !cs.Spec.ScaleStrategy.CleanPVC {
+		return nil
+	}
+	for _, pod := range inactivePods {
+		pvcs := clonesetutils.GetPersistentVolumeClaims(cs, pod)
+		for _, pvc := range pvcs {
+			err := r.Delete(context.TODO(), &pvc)
+			if err != nil && errors.IsNotFound(err) {
+				klog.Warningf("duizhangerr %v \n", err)
+			} else if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

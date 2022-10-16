@@ -93,6 +93,9 @@ type CloneSetScaleStrategy struct {
 	// The scale will fail if the number of unavailable pods were greater than this MaxUnavailable at scaling up.
 	// MaxUnavailable works only when scaling up.
 	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
+	// Default value is false.
+	// The scale will delete old pvc(create new one) if this field is true.
+	CleanPVC bool `json:"cleanPVC,omitempty"`
 }
 
 // CloneSetUpdateStrategy defines strategies for pods update.

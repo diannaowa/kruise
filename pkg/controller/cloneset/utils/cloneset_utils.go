@@ -92,21 +92,23 @@ func GetControllerKey(cs *appsv1alpha1.CloneSet) string {
 }
 
 // GetActivePods returns all active pods in this namespace.
-func GetActivePods(reader client.Reader, opts *client.ListOptions) ([]*v1.Pod, error) {
+func GetActivePods(reader client.Reader, opts *client.ListOptions) ([]*v1.Pod, []*v1.Pod, error) {
 	podList := &v1.PodList{}
 	if err := reader.List(context.TODO(), podList, opts, utilclient.DisableDeepCopy); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Ignore inactive pods
 	var activePods []*v1.Pod
+	var inactivePods []*v1.Pod
 	for i, pod := range podList.Items {
 		// Consider all rebuild pod as active pod, should not recreate
 		if kubecontroller.IsPodActive(&pod) {
 			activePods = append(activePods, &podList.Items[i])
+		} else {
+			inactivePods = append(inactivePods, &podList.Items[i])
 		}
 	}
-	return activePods, nil
+	return activePods, inactivePods, nil
 }
 
 // NextRevision finds the next valid revision number based on revisions. If the length of revisions
