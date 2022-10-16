@@ -577,8 +577,9 @@ func (r *ReconcileCloneSet) claimPods(instance *appsv1alpha1.CloneSet, pods []*v
 
 	return claimedPods, nil
 }
+
 func (r *ReconcileCloneSet) cleanupUselessPVCs(cs *appsv1alpha1.CloneSet, inactivePods []*v1.Pod) error {
-	if len(inactivePods) == 0 || !cs.Spec.ScaleStrategy.CleanPVC {
+	if len(inactivePods) == 0 || !cs.Spec.ScaleStrategy.AutoCleanupPVC {
 		return nil
 	}
 	for _, pod := range inactivePods {
@@ -586,7 +587,7 @@ func (r *ReconcileCloneSet) cleanupUselessPVCs(cs *appsv1alpha1.CloneSet, inacti
 		for _, pvc := range pvcs {
 			err := r.Delete(context.TODO(), &pvc)
 			if err != nil && errors.IsNotFound(err) {
-				klog.Warningf("duizhangerr %v \n", err)
+				klog.Warningf("cleanup useless pvc error: %v \n", err)
 			} else if err != nil {
 				return err
 			}

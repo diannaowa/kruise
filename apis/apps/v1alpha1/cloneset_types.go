@@ -95,7 +95,7 @@ type CloneSetScaleStrategy struct {
 	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 	// Default value is false.
 	// The scale will delete old pvc(create new one) if this field is true.
-	CleanPVC bool `json:"cleanPVC,omitempty"`
+	AutoCleanupPVC bool `json:"autoCleanupPVC,omitempty"`
 }
 
 // CloneSetUpdateStrategy defines strategies for pods update.
