@@ -27,18 +27,6 @@ import (
 	"sync"
 	"time"
 
-	appspub "github.com/openkruise/kruise/apis/apps/pub"
-	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
-	"github.com/openkruise/kruise/pkg/client"
-	"github.com/openkruise/kruise/pkg/control/sidecarcontrol"
-	daemonruntime "github.com/openkruise/kruise/pkg/daemon/criruntime"
-	"github.com/openkruise/kruise/pkg/daemon/kuberuntime"
-	daemonoptions "github.com/openkruise/kruise/pkg/daemon/options"
-	"github.com/openkruise/kruise/pkg/features"
-	"github.com/openkruise/kruise/pkg/util"
-	utilcontainermeta "github.com/openkruise/kruise/pkg/util/containermeta"
-	"github.com/openkruise/kruise/pkg/util/expectations"
-	utilfeature "github.com/openkruise/kruise/pkg/util/feature"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,6 +44,19 @@ import (
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	kubeletcontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+
+	appspub "github.com/openkruise/kruise/apis/apps/pub"
+	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
+	"github.com/openkruise/kruise/pkg/client"
+	"github.com/openkruise/kruise/pkg/control/sidecarcontrol"
+	daemonruntime "github.com/openkruise/kruise/pkg/daemon/criruntime"
+	"github.com/openkruise/kruise/pkg/daemon/kuberuntime"
+	daemonoptions "github.com/openkruise/kruise/pkg/daemon/options"
+	"github.com/openkruise/kruise/pkg/features"
+	"github.com/openkruise/kruise/pkg/util"
+	utilcontainermeta "github.com/openkruise/kruise/pkg/util/containermeta"
+	"github.com/openkruise/kruise/pkg/util/expectations"
+	utilfeature "github.com/openkruise/kruise/pkg/util/feature"
 )
 
 var (
@@ -149,7 +150,6 @@ func eventFilter(oldPod, newPod *v1.Pod) bool {
 	if !ownedByKruise && !injectedBySidecarSet {
 		return false
 	}
-
 	// Is containerID changed?
 	if oldPod != nil && len(oldPod.Spec.Containers) != len(newPod.Spec.Containers) {
 		return true
@@ -166,6 +166,10 @@ func eventFilter(oldPod, newPod *v1.Pod) bool {
 			return true
 		}
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceUpdateEnvFromMetadata) {
+			// skip, if image is changed ,since kubelet will process this case.
+			if containerMetaSet.Containers[i].Image != newPod.Status.ContainerStatuses[i].Image {
+				return false
+			}
 			hasher := utilcontainermeta.NewEnvFromMetadataHasher()
 			newHash := hasher.GetExpectHash(&newPod.Spec.Containers[i], newPod)
 			if newHash != containerMetaSet.Containers[i].Hashes.ExtractedEnvFromMetadataHash {
@@ -344,6 +348,7 @@ func (c *Controller) manageContainerMetaSet(pod *v1.Pod, kubePodStatus *kubeletc
 				ContainerID:  status.ID.String(),
 				RestartCount: int32(status.RestartCount),
 				Hashes:       appspub.RuntimeContainerHashes{PlainHash: status.Hash},
+				Image:        status.Image,
 			}
 		}
 		if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceUpdateEnvFromMetadata) {
