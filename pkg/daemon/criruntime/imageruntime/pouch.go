@@ -148,6 +148,10 @@ func (d *pouchImageService) ListImages(ctx context.Context) ([]ImageInfo, error)
 	return newImageCollectionPouch(infos), nil
 }
 
+func (d *pouchImageService) ImageStatus(ctx context.Context, image string) (*ImageInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 func newImageCollectionPouch(infos []pouchtypes.ImageInfo) []ImageInfo {
 	collection := make([]ImageInfo, 0, len(infos))
 	for _, info := range infos {

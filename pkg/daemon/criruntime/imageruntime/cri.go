@@ -190,3 +190,25 @@ func (c *commonCRIImageService) ListImages(ctx context.Context) ([]ImageInfo, er
 	}
 	return collection, nil
 }
+
+func (c *commonCRIImageService) ImageStatus(ctx context.Context, image string) (*ImageInfo, error) {
+	imagesReq := &runtimeapi.ImageStatusRequest{
+		Image: &runtimeapi.ImageSpec{
+			Image: image,
+		},
+	}
+
+	img, err := c.criImageClient.ImageStatus(ctx, imagesReq)
+	if err != nil {
+		return nil, err
+	}
+
+	info := &ImageInfo{
+		ID:          img.Image.GetId(),
+		RepoTags:    img.Image.GetRepoTags(),
+		RepoDigests: img.Image.GetRepoDigests(),
+		Size:        int64(img.Image.GetSize_()),
+	}
+
+	return info, nil
+}

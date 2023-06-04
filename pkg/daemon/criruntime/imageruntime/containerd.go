@@ -126,6 +126,10 @@ func (d *containerdImageClient) ListImages(ctx context.Context) ([]ImageInfo, er
 	return collection, nil
 }
 
+func (d *containerdImageClient) ImageStatus(ctx context.Context, image string) (*ImageInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // doPullImage returns pipe reader as ImagePullStatusReader to notify the progressing.
 func (d *containerdImageClient) doPullImage(ctx context.Context, ref reference.Named, isSchema1 bool, resolver remotes.Resolver) ImagePullStatusReader {
 	ongoing := newFetchJobs(ref.String())

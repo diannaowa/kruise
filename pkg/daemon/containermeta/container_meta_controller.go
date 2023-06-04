@@ -32,6 +32,7 @@ import (
 	"github.com/openkruise/kruise/pkg/client"
 	"github.com/openkruise/kruise/pkg/control/sidecarcontrol"
 	daemonruntime "github.com/openkruise/kruise/pkg/daemon/criruntime"
+	runtimeimage "github.com/openkruise/kruise/pkg/daemon/criruntime/imageruntime"
 	"github.com/openkruise/kruise/pkg/daemon/kuberuntime"
 	daemonoptions "github.com/openkruise/kruise/pkg/daemon/options"
 	"github.com/openkruise/kruise/pkg/features"
@@ -261,7 +262,7 @@ func (c *Controller) sync(key string) (retErr error) {
 		resourceVersionExpectation.Delete(pod)
 	}
 
-	criRuntime, kubeRuntime, err := c.getRuntimeForPod(pod)
+	criRuntime, imageService, kubeRuntime, err := c.getRuntimeForPod(pod)
 	if err != nil {
 		klog.Errorf("Failed to get runtime for Pod %s/%s: %v", namespace, name, err)
 		return nil
@@ -289,9 +290,27 @@ func (c *Controller) sync(key string) (retErr error) {
 	}
 	newMetaSet := c.manageContainerMetaSet(pod, kubePodStatus, oldMetaSet, criRuntime)
 
+	c.manageContainerImageInfo(pod, newMetaSet, imageService)
+
 	return c.reportContainerMetaSet(pod, oldMetaSet, newMetaSet)
 }
 
+func (c *Controller) manageContainerImageInfo(pod *v1.Pod, metaSet *appspub.RuntimeContainerMetaSet, imageService runtimeimage.ImageService) {
+
+	// get image id from cri, if image of the container changed
+	for _, container := range pod.Spec.Containers {
+		for i, meta := range metaSet.Containers {
+			if meta.Name == container.Name && container.Image != meta.Image {
+				imageInfo, err := imageService.ImageStatus(context.TODO(), container.Image)
+				if err != nil {
+					klog.Warningf("get imageID of container %s/%s err: %v", pod.Name, container.Image, err)
+					continue
+				}
+				metaSet.Containers[i]. = meta
+			}
+		}
+	}
+}
 func (c *Controller) reportContainerMetaSet(pod *v1.Pod, oldMetaSet, newMetaSet *appspub.RuntimeContainerMetaSet) error {
 	if reflect.DeepEqual(oldMetaSet, newMetaSet) {
 		return nil
@@ -405,9 +424,9 @@ func wrapEnvGetter(criRuntime criapi.RuntimeService, containerID, logID string) 
 	}
 }
 
-func (c *Controller) getRuntimeForPod(pod *v1.Pod) (criapi.RuntimeService, kuberuntime.Runtime, error) {
+func (c *Controller) getRuntimeForPod(pod *v1.Pod) (criapi.RuntimeService, runtimeimage.ImageService, kuberuntime.Runtime, error) {
 	if len(pod.Status.ContainerStatuses) == 0 {
-		return nil, nil, fmt.Errorf("empty containerStatuses in pod status")
+		return nil, nil, nil, fmt.Errorf("empty containerStatuses in pod status")
 	}
 
 	var existingID string
@@ -418,21 +437,21 @@ func (c *Controller) getRuntimeForPod(pod *v1.Pod) (criapi.RuntimeService, kuber
 		}
 	}
 	if existingID == "" {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	containerID := kubeletcontainer.ContainerID{}
 	if err := containerID.ParseString(pod.Status.ContainerStatuses[0].ContainerID); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse containerID %s: %v", pod.Status.ContainerStatuses[0].ContainerID, err)
+		return nil, nil, nil, fmt.Errorf("failed to parse containerID %s: %v", pod.Status.ContainerStatuses[0].ContainerID, err)
 	} else if containerID.Type == "" {
-		return nil, nil, fmt.Errorf("no runtime name in containerID %s", pod.Status.ContainerStatuses[0].ContainerID)
+		return nil, nil, nil, fmt.Errorf("no runtime name in containerID %s", pod.Status.ContainerStatuses[0].ContainerID)
 	}
 
 	runtimeName := containerID.Type
 	runtimeService := c.runtimeFactory.GetRuntimeServiceByName(runtimeName)
 	if runtimeService == nil {
-		return nil, nil, fmt.Errorf("not found runtime service for %s in daemon", runtimeName)
+		return nil, nil, nil, fmt.Errorf("not found runtime service for %s in daemon", runtimeName)
 	}
-
-	return runtimeService, kuberuntime.NewGenericRuntime(runtimeName, runtimeService, nil, &http.Client{}), nil
+	imageService := c.runtimeFactory.GetImageService()
+	return runtimeService, imageService, kuberuntime.NewGenericRuntime(runtimeName, runtimeService, nil, &http.Client{}), nil
 }

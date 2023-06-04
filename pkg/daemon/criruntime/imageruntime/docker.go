@@ -23,6 +23,7 @@ import (
 
 	appsv1alpha1 "github.com/openkruise/kruise/apis/apps/v1alpha1"
 
+	"fmt"
 	dockertypes "github.com/docker/docker/api/types"
 	dockerapi "github.com/docker/docker/client"
 	daemonutil "github.com/openkruise/kruise/pkg/daemon/util"
@@ -144,6 +145,10 @@ func (d *dockerImageService) ListImages(ctx context.Context) ([]ImageInfo, error
 		return nil, err
 	}
 	return newImageCollectionDocker(infos), nil
+}
+
+func (d *dockerImageService) ImageStatus(ctx context.Context, image string) (*ImageInfo, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 func newImageCollectionDocker(infos []dockertypes.ImageSummary) []ImageInfo {
